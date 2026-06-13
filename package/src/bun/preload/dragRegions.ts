@@ -9,11 +9,13 @@ function isAppRegionDrag(e: MouseEvent): boolean {
 	if (!target || !target.closest) return false;
 
 	// If the target is inside a no-drag region, it should not trigger window move
-  if (
-    target.closest(".electrobun-webkit-app-region-no-drag") ||
-    target.closest('[style*="app-region"][style*="no-drag"]')
-  ) {
-    return false;
+	if (
+		target.closest(
+			'.electrobun-webkit-app-region-no-drag, button, a, input, select, textarea, [role="button"], [data-no-drag]',
+		) ||
+		target.closest('[style*="app-region"][style*="no-drag"]')
+	) {
+		return false;
 	}
 
 	// Check for inline style with app-region: drag

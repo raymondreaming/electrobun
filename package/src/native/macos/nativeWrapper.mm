@@ -608,6 +608,40 @@ static void applyWindowButtonPosition(NSWindow *window, double x, double y) {
     [zoomBtn setFrameOrigin:NSMakePoint(x + 2 * buttonSpacing, adjustedY)];
 }
 
+static bool shouldDragHiddenInsetTitlebar(NSWindow *window, NSView *view, NSEvent *event) {
+    if (!shouldManageTrafficLights(window) || !view || !event || event.type != NSEventTypeLeftMouseDown) {
+        return false;
+    }
+
+    NSPoint pointInView = [view convertPoint:event.locationInWindow fromView:nil];
+    if (!NSPointInRect(pointInView, view.bounds)) {
+        return false;
+    }
+
+    const CGFloat nativeTitlebarDragHeight = 32.0;
+    CGFloat distanceFromTop = NSMaxY(view.bounds) - pointInView.y;
+    return distanceFromTop >= 0 && distanceFromTop <= nativeTitlebarDragHeight;
+}
+
+@interface ElectrobunWKWebView : WKWebView
+@end
+
+@implementation ElectrobunWKWebView
+- (BOOL)mouseDownCanMoveWindow {
+    return NO;
+}
+
+- (void)mouseDown:(NSEvent *)event {
+    NSWindow *window = self.window;
+    if (shouldDragHiddenInsetTitlebar(window, self, event)) {
+        [window performWindowDragWithEvent:event];
+        return;
+    }
+
+    [super mouseDown:event];
+}
+@end
+
 // Window, tray, menu, and snapshot callbacks are defined in shared/callbacks.h
 // Platform-specific aliases
 typedef SnapshotCallback zigSnapshotCallback;
@@ -2584,7 +2618,7 @@ runOpenPanelWithParameters:(WKOpenPanelParameters *)parameters
                 [configuration setURLSchemeHandler:assetSchemeHandler forURLScheme:@"views"];
                 
                 // create WKWebView
-                self.webView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
+                self.webView = [[ElectrobunWKWebView alloc] initWithFrame:frame configuration:configuration];
 
                 // Only set transparent background for main window webviews (autoResize/fullscreen)
                 // Child webviews (OOPIFs) need a visible background to render properly
@@ -7805,36 +7839,36 @@ extern "C" void stopWindowMove() {
 }
 
 extern "C" void startWindowMove(NSWindow *window) {
-    targetWindow = window;
-    if (!targetWindow) {
+    if (!window) {
         NSLog(@"No window found for the given WebView.");
         return;
     }
-    isMovingWindow = YES;
-    NSPoint initialLocation = [NSEvent mouseLocation];
 
-    mouseDraggedMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:(NSEventMaskLeftMouseDragged | NSEventMaskMouseMoved)
-                                                                handler:^NSEvent *(NSEvent *event) {
-        if (isMovingWindow) {
-            NSPoint currentLocation = [NSEvent mouseLocation];
-            if (offsetX == 0.0 && offsetY == 0.0) {
-                NSPoint windowOrigin = targetWindow.frame.origin;
-                offsetX = initialLocation.x - windowOrigin.x;
-                offsetY = initialLocation.y - windowOrigin.y;
-            }
-            CGFloat newX = currentLocation.x - offsetX;
-            CGFloat newY = currentLocation.y - offsetY;
-            [targetWindow setFrameOrigin:NSMakePoint(newX, newY)];
-        }
-        return event;
-    }];
-    mouseUpMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseUp
-                                                           handler:^NSEvent *(NSEvent *event) {
-        if (isMovingWindow) {
-            stopWindowMove();
-        }
-        return event;
-    }];
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            startWindowMove(window);
+        });
+        return;
+    }
+
+    stopWindowMove();
+
+    NSEvent *event = [NSApp currentEvent];
+    if (!event || event.type != NSEventTypeLeftMouseDown || event.window != window) {
+        NSPoint screenPoint = [NSEvent mouseLocation];
+        NSPoint windowPoint = [window convertPointFromScreen:screenPoint];
+        event = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown
+                                   location:windowPoint
+                              modifierFlags:0
+                                  timestamp:[NSDate timeIntervalSinceReferenceDate]
+                               windowNumber:window.windowNumber
+                                    context:nil
+                                eventNumber:0
+                                 clickCount:1
+                                   pressure:1.0];
+    }
+
+    [window performWindowDragWithEvent:event];
 }
 
 
